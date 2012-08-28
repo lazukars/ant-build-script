@@ -367,6 +367,13 @@
         <delete dir="./${dir.intermediate}/"/>
         <delete dir="./${dir.publish}/"/>
     </target>
+    <target name="compile">
+    <javac
+      fork="true"
+      srcdir="${dir.build.tools}"
+      destdir="${dir.build.tools}"
+      includeantruntime="false" />
+  </target>
     <target name="-intro" description="(PRIVATE) Kindly inform the developer about the impending magic">
         <!-- This is a private target -->
         
@@ -451,25 +458,30 @@
     </target>
     
     <!-- JAVASCRIPT -->
-    <target name="-js.main.concat" depends="-js.all.minify" description="(PRIVATE) Concatenates the JS files in dir.js">
+    <target name="-js.main.concat" depends="-js.all.minify , compile" description="(PRIVATE) Concatenates the JS files in dir.js">
         <filelist id="file.root" dir="${dir.source}" files="${file.root.page}"/>
         <echo message="Concatenating Main JS scripts based on ${file.root.page}..."/>
-        <apply executable="java" parallel="false"
-          outputproperty="scripts.ordered">
-            <arg value="-cp"/>
-            <arg value="./${dir.build.tools}"/>
-            <arg value="ScriptsToConcat"/>
-            <first>
-                <filelist refid="file.root"/>
-            </first>
-        </apply>
-        <filelist id="scripts.toconcat" dir="./${dir.intermediate}/" files="${scripts.ordered}">
-        </filelist>
-        
-        <!-- overwrite=no here means not to overwrite if the target is newer than the sources -->
+        <exec executable="java" outputproperty="scriptsToConcat">
+          <arg value="-classpath" />
+          <arg value="${dir.build.tools}" />
+           <arg value="FindAttribute" />
+           <arg value="${file.root.page}" />
+           <arg value="${jstoken}" />
+           <arg value="script" />
+           <arg value="src" />
+         </exec>
+    <echo message="${scriptsToConcat}" />
+
+    <!-- Concatenate scripts to intermediate/js/libs/libs.js -->
+    <!-- overwrite=no here means not to overwrite if the target is newer than the sources -->
+    <!-- Filter out byte order marks (see http://stackoverflow.com/questions/2742735/get-ant-concat-to-ignore-boms) -->
         <concat destfile="./${dir.intermediate}/${dir.js}/scripts-concat.min.js" overwrite="no">
-            <filelist refid="scripts.toconcat"/>
+          <filelist dir="./${dir.intermediate}/" files="${scriptsToConcat}" />
+          <filterchain>
+            <deletecharacters chars="&#xFEFF;" />
+          </filterchain>
         </concat>
+        
     </target>
     <target name="-js.scripts.concat" depends="-js.main.concat" if="build.concat.scripts">
         <echo message="Concatenating library file with main script file"/>
@@ -595,19 +607,19 @@
             <isset property="script.require.path"/>
             <then>
                 <echo message="Updating HTML to reflect the use of RequireJS"/>
-                <var name="matchRegex" value="&lt;!-- scripts concatenated [\d\w\s\W]*&lt;script.*data-main=['&quot;]?(.*)/${file.root.script}(?:\?.*)?['&quot;] src=['&quot;]?(.*)${script.require.path}(?:\?.*)?['&quot;]?\s*&gt;\s*&lt;/script&gt;[\d\w\s\W]*&lt;!-- end ((scripts)|(concatenated and minified scripts))\s*--&gt;"/>
+                <var name="matchRegex" value="&lt;!-- //-beg- ${jstoken} [\d\w\s\W]*&lt;script.*data-main=['&quot;]?(.*)/${file.root.script}(?:\?.*)?['&quot;] src=['&quot;]?(.*)${script.require.path}(?:\?.*)?['&quot;]?\s*&gt;\s*&lt;/script&gt;[\d\w\s\W]**&lt;!-- //-end- ${jstoken} --&gt;"/>
                 <var name="replaceRegex" value="&lt;script data-main='\1/${scripts.sha}.js\' src='${script.require.path}'&gt;&lt;/script&gt;"/>
             </then>
             <else>
                 <echo message="Updating HTML to reflect the use of default script inclusion"/>
-                <var name="matchRegex" value="&lt;!-- scripts concatenated [\d\w\s\W]*&lt;script.*src=['&quot;]?(.*)/${file.root.script}(?:\?.*)?['&quot;]?\s*&gt;\s*&lt;/script&gt;[\d\w\s\W]*&lt;!-- end ((scripts)|(concatenated and minified scripts))\s*--&gt;" />
-                <var name="replaceRegex" value="&lt;script src='\1/${scripts.sha}.js\'&gt;&lt;/script&gt;" />
+                   <replaceregexp
+        match="&lt;!-- //-beg- ${jstoken} --&gt;.*&lt;!-- //-end- ${jstoken} --&gt;"
+        replace="&lt;script src=&quot;${scripts.sha}.js&quot;&gt;&lt;/script&gt;"
+        flags="gs">
+      <fileset dir="${dir.intermediate}" includes="${page-files}" />
+    </replaceregexp>
             </else>
         </if>
-        <!-- style.css replacement handled as a replacetoken above -->
-        <replaceregexp match="${matchRegex}" replace="${replaceRegex}" flags="m">
-            <fileset dir="${dir.intermediate}" includes="${page-files}"/>
-        </replaceregexp>
         <!--[! use comments like this one to avoid having them get minified -->
         
         <echo message="Update the HTML to reference our name-mangled modules directory"/>
